@@ -1,0 +1,2 @@
+# Shared runtime (classical CV pipeline). Pin loosely for portability.
+numpy>=1.24.0,<3.0.0

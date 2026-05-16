@@ -1,0 +1,4 @@
+# Install ON the Jetson after JetPack / system OpenCV are present.
+# Use: pip install -r requirements/jetson.txt --index-url "$ONNX_INDEX_URL"
+-r base.txt
+# Do not pip-install opencv-python on device; use apt python3-opencv + --system-site-packages.

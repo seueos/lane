@@ -1,0 +1,2 @@
+# Quick install on x86 desktop (Jetson-like app paths: use scripts/setup_dev_jetson_sim.sh)
+-r requirements/dev-x86.txt

@@ -1,0 +1,26 @@
+# Optional: run on a host with Docker + QEMU binfmt for arm64.
+# Closest match to Jetson Orin Nano userland (L4T / JetPack 6, aarch64, Python 3.10).
+#
+#   docker buildx build --platform linux/arm64 -f docker/Dockerfile.jetson-dev -t lane-tracking:jetson .
+#   docker run --rm -it -v "$PWD":/workspace lane-tracking:jetson bash
+#
+# Note: CSI camera (nvarguscamerasrc) only works on real hardware.
+
+FROM nvcr.io/nvidia/l4t-ml:r36.2.0-py3
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-venv python3-opencv \
+    gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements/ /workspace/requirements/
+RUN python3 -m pip install -U pip wheel \
+    && python3 -m pip install -r requirements/jetson.txt \
+    && python3 -m pip install onnxruntime-gpu --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+ENV JETSON_SIM=1
+ENV PYTHONPATH=/workspace
+
+CMD ["/bin/bash"]
