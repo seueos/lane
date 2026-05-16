@@ -36,4 +36,7 @@ ssh "$JETSON_HOST" "cd ${REMOTE_DIR} && cp -n deploy/jetson.env.example deploy/j
 echo "Done. SSH in and run:"
 echo "  ssh ${JETSON_HOST}"
 echo "  cd ${REMOTE_DIR} && source .venv/bin/activate"
+echo "  # classical:"
 echo "  python main.py csi --csi --process-width ${JETSON_PROCESS_WIDTH:-640} --print-fps"
+echo "  # ONNX (pin on server: bash scripts/export_onnx.sh; rsync: bash scripts/rsync_onnx_to_jetson.sh):"
+echo "  python main.py csi --csi --backend onnx --process-width ${JETSON_PROCESS_WIDTH:-640} --print-fps"

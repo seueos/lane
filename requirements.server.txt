@@ -1,0 +1,5 @@
+# Server-side (x86_64): ONNX artifact pin, validate, ORT bench.
+# Use with: python -m venv .venv && source .venv/bin/activate && pip install -r requirements.server.txt
+
+-r requirements/dev-x86.txt
+onnx>=1.15.0,<2.0.0

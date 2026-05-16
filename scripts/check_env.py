@@ -40,10 +40,22 @@ def main() -> int:
         print(f"onnxruntime: {ort.__version__}")
         print(f"  providers: {ort.get_available_providers()}")
     except ImportError:
-        print("onnxruntime: MISSING (optional until you add ONNX models)")
+        print("onnxruntime: MISSING (pip install -r requirements/dev-x86.txt)")
+        ok = False
     except Exception as exc:
         print(f"onnxruntime: error — {exc}")
         ok = False
+
+    artifact = ROOT / "artifacts" / "onnx" / "lane_detector.onnx"
+    legacy = ROOT / "models" / "lane_detector.onnx"
+    model = artifact if artifact.is_file() else legacy
+    if model.is_file():
+        print(f"onnx model: {model} ({model.stat().st_size // 1024} KiB)")
+        meta = model.with_suffix(".json")
+        if meta.is_file():
+            print(f"  metadata: {meta}")
+    else:
+        print("onnx model: not pinned (bash scripts/export_onnx.sh --src /path/to/model.onnx)")
 
     from src.capture import is_jetson
 

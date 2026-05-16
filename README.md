@@ -27,9 +27,18 @@ lane_tracking/
 │   ├── lane_geometry.py # 검증, 적응형 지평선
 │   ├── lane_tracker.py  # 프레임 간 EMA 스무딩
 │   └── visualize.py     # 폴리곤 / 직선 오버레이
+├── artifacts/
+│   ├── onnx/              # 서버에서 고정한 ONNX + .json 메타
+│   └── trt/               # Jetson에서 빌드한 TensorRT 엔진
 ├── scripts/
-│   ├── generate_test_frame.py  # 합성 도로 이미지 생성
-│   └── verify_pipeline.py      # 헤드리스 스모크 테스트
+│   ├── export_onnx.sh     # ONNX 아티팩트 고정
+│   ├── validate_onnx.sh   # onnx.checker + ORT 1회
+│   ├── bench_server.sh    # 서버 ORT 벤치
+│   ├── trt_build.sh       # Jetson trtexec 빌드
+│   ├── trt_bench.sh       # Jetson trtexec 벤치
+│   ├── rsync_onnx_to_jetson.sh
+│   ├── generate_test_frame.py
+│   └── verify_pipeline.py
 └── assets/              # 테스트·디버그 이미지
 ```
 
@@ -248,6 +257,96 @@ python scripts/verify_pipeline.py
 - 조명 변화, 희미한 마킹, 가림에 취약
 - EMA 지연으로 급격한 차선 변경·차선 변경 구간에서 늦게 반응
 - 검출 실패 시 hold-last로 잘못된 위치가 고정될 수 있음
+
+## NVIDIA Jetson Orin Nano / ONNX Runtime
+
+데스크톱에서 Jetson과 **동일한 앱 경로**(ONNX Runtime, `JETSON_SIM`, `--process-width 640`)로 개발한 뒤, 실기기로 rsync 배포할 수 있습니다.
+
+| 환경 | 용도 | 설치 |
+|------|------|------|
+| `.venv` | 서버 ONNX 고정·검증·벤치 | `pip install -r requirements.server.txt` |
+| `.venv-jetson-sim` | x86에서 Jetson 동작 시뮬 | `bash scripts/setup_dev_jetson_sim.sh` |
+| Jetson `.venv` | Orin Nano 실기기 | `bash scripts/setup_jetson_device.sh` (기기에서) |
+
+## 서버→Jetson 이식 흐름(ONNX 고정 → 검증/벤치 → TensorRT)
+
+이 레포는 **서버에서 ONNX를 “아티팩트로 고정”**하고, 그 파일을 그대로 Jetson으로 옮겨서
+TensorRT 변환/벤치를 수행하는 흐름으로 실수 포인트를 줄이도록 구성합니다.
+
+### 1) 서버에서 ONNX 아티팩트로 고정(복사 + 메타데이터)
+
+서버에서 생성/보유한 `lane_detector.onnx`를 `artifacts/onnx/`로 복사하고, 해시/크기 등을 JSON으로 남깁니다.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.server.txt
+
+# 예시: 외부 경로의 onnx를 아티팩트로 고정
+bash scripts/export_onnx.sh --src /path/to/lane_detector.onnx --name lane_detector
+```
+
+결과:
+
+- `artifacts/onnx/lane_detector.onnx`
+- `artifacts/onnx/lane_detector.json` (sha256 포함)
+
+### 2) 서버에서 ONNX 검증(onnx.checker + ORT 1회 실행)
+
+```bash
+bash scripts/validate_onnx.sh --name lane_detector --batch 1
+```
+
+### 3) 서버에서 ORT 벤치(지연시간 대략치)
+
+```bash
+bash scripts/bench_server.sh --name lane_detector --batch 1 --warmup 10 --iters 50
+```
+
+### 4) Jetson에서 TensorRT 엔진 빌드/벤치(trtexec)
+
+Jetson으로 `artifacts/onnx/`를 그대로 복사한 뒤:
+
+```bash
+# 서버에서 (deploy/jetson.env 설정 후)
+bash scripts/rsync_onnx_to_jetson.sh
+# 또는: rsync -av artifacts/onnx/ <jetson>:~/lane_tracking/artifacts/onnx/
+```
+
+Jetson에서 실행합니다 (`trtexec` 필요, 입력 이름은 export된 그래프에 맞게 조정):
+
+```bash
+bash scripts/trt_build.sh --name lane_detector --fp16 --shapes "input:1x3x360x640"
+bash scripts/trt_bench.sh --name lane_detector --iters 100
+```
+
+### 앱 실행 (ONNX Runtime)
+
+```bash
+# Jetson-sim (x86, API는 기기 onnxruntime-gpu와 동일)
+bash scripts/setup_dev_jetson_sim.sh
+source .venv-jetson-sim/bin/activate
+source .venv-jetson-sim/bin/activate.jetson-sim
+
+python main.py assets/test_road.png --backend onnx --save out.jpg --no-display
+python main.py 1_2.mp4 --backend onnx --process-width 640 -o out.mp4 --no-display
+```
+
+전체 프로젝트 배포: `deploy/jetson.env.example` → `deploy/jetson.env`에 `JETSON_HOST` 설정 후 `bash scripts/sync_to_jetson.sh`
+
+기기 예시:
+
+```bash
+source .venv/bin/activate
+python main.py csi --csi --backend onnx --process-width 640 --print-fps
+```
+
+| 백엔드 | 설명 |
+|--------|------|
+| `classical` (기본) | Canny + Hough + EMA (OpenCV) |
+| `onnx` | `artifacts/onnx/lane_detector.onnx` + ONNX Runtime + 동일 EMA/오버레이 |
+
+입력 해상도는 ONNX 그래프에 고정 (**640×360**, NCHW). 캡처 해상도는 `--process-width`로 스케일 후 세션 내부에서 리사이즈합니다.
 
 ## 라이선스
 

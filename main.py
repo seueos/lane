@@ -103,6 +103,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print processing FPS to stderr every second",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("classical", "onnx"),
+        default="classical",
+        help="Inference backend: OpenCV pipeline or ONNX Runtime model",
+    )
+    parser.add_argument(
+        "--onnx-model",
+        type=str,
+        default="artifacts/onnx/lane_detector.onnx",
+        help="ONNX model path when --backend onnx (default: pinned artifact)",
+    )
     return parser.parse_args()
 
 
@@ -238,18 +250,41 @@ def main() -> int:
     if process_width <= 0 and is_jetson() and _is_live_source(source, use_csi):
         process_width = 640
 
-    config = LanePipelineConfig(
-        canny_low=args.canny_low,
-        canny_high=args.canny_high,
-        use_tracking=not args.no_track,
-    )
     ref_w = args.camera_width if use_csi else 1280
-    if process_width > 0:
-        config = scale_config(config, process_width / ref_w)
-        pipeline = LanePipeline(config)
-        apply_tracker_scale(pipeline.tracker, process_width / ref_w)
+    scale = process_width / ref_w if process_width > 0 else 1.0
+
+    if args.backend == "onnx":
+        from pathlib import Path as _Path
+
+        from src.onnx_lane.pipeline import OnnxLanePipeline, OnnxLanePipelineConfig
+
+        model_path = _Path(args.onnx_model)
+        if not model_path.is_file():
+            print(
+                f"ONNX model not found: {model_path}\n"
+                "  bash scripts/export_onnx.sh --src /path/to/lane_detector.onnx --name lane_detector",
+                file=sys.stderr,
+            )
+            return 1
+        onnx_cfg = OnnxLanePipelineConfig(
+            model_path=str(model_path),
+            use_tracking=not args.no_track,
+        )
+        pipeline = OnnxLanePipeline(onnx_cfg)
+        if scale < 0.999:
+            apply_tracker_scale(pipeline.tracker, scale)
     else:
-        pipeline = LanePipeline(config)
+        config = LanePipelineConfig(
+            canny_low=args.canny_low,
+            canny_high=args.canny_high,
+            use_tracking=not args.no_track,
+        )
+        if scale < 0.999:
+            config = scale_config(config, scale)
+            pipeline = LanePipeline(config)
+            apply_tracker_scale(pipeline.tracker, scale)
+        else:
+            pipeline = LanePipeline(config)
 
     path = Path(source)
 

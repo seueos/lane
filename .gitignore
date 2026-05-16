@@ -6,3 +6,15 @@ __pycache__/
 training_video/
 assets/test_result.png
 deploy/jetson.env
+
+# Pinned ONNX / TensorRT artifacts (generated on server / Jetson)
+artifacts/onnx/*.onnx
+artifacts/onnx/*.json
+artifacts/trt/*
+!artifacts/onnx/.gitkeep
+!artifacts/trt/.gitkeep
+
+# Legacy model paths (prefer artifacts/onnx/)
+models/*.onnx
+models/*.engine
+!models/.gitkeep
